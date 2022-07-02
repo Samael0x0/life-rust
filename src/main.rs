@@ -3,244 +3,232 @@
 use ggez::{Context, GameResult, event, GameError};
 use ggez::graphics::{present, draw, clear, Image, DrawParam, Color};
 use ggez::conf::{WindowSetup, WindowMode};
-use ggez::input::keyboard::KeyCode;
+use ggez::input::{keyboard::KeyCode, mouse::button_pressed};
 use ggez::event::{EventHandler, MouseButton, quit, KeyMods};
-use ggez::graphics::spritebatch::SpriteBatch;
+use ggez::graphics::{self, spritebatch::SpriteBatch};
 use ggez::mint::Point2;
 use ggez::timer::sleep;
 use std::time::Duration;
 use std::path::Path;
+use std::cmp::{max, min};
 
 fn main() -> GameResult {
-    let config = GameConfig::new();
-
     let window_setup = WindowSetup::default()
         .title("Life")
         .icon("/icon.png");
 
     let window_mode = WindowMode::default()
-        .dimensions((config.game_width * config.tile_size) as f32 , (config.game_height * config.tile_size) as f32 );
-        // .resizable(true);
+        .dimensions(1600.0, 900.0);
 
     let (ctx, event_loop) =
-        ggez::ContextBuilder::new("game_of_life", "samael")
+        ggez::ContextBuilder::new("game_of_life", "aventuracodes")
             .window_setup(window_setup)
             .window_mode(window_mode)
             .add_resource_path(Path::new("/resources"))
         .build()?;
-    
-    event::run(ctx, event_loop,GameState::new(config))
+
+    let state = GameState::new(&ctx);
+
+    event::run(ctx, event_loop, state)
 }
 
-struct GameConfig {
-    game_width: i32,
-    game_height: i32,
-    tile_size: i32,
+const TILE_SIZE : usize = 5;
+
+struct GameBoard {
+    board: Vec<Vec<bool>>
 }
 
-impl GameConfig {
-    fn new() -> GameConfig {
-        GameConfig {
-            game_width: 190,
-            game_height: 100,
-            tile_size: 10
+impl GameBoard {
+    fn new(width: usize, height: usize, random: bool) -> Self {
+        let mut vec = Vec::new();
+        for _ in 0..height {
+            let mut vec_row = Vec::new();
+            for _ in 0..width {
+                if random { vec_row.push(rand::random::<bool>()); }
+                else { vec_row.push(false); }
+            }
+            vec.push(vec_row)
         }
+
+        GameBoard {
+            board: vec
+        }
+    }
+
+    fn recreate(&mut self, random: bool) {
+        for y in 0..self.board.len() {
+            for x in 0..self.board[y].len() {
+                self.board[y][x] = {
+                    if random { rand::random::<bool>() }
+                    else { false }
+                }
+            }
+        }
+    }
+
+    fn set(&mut self, x: usize, y: usize, value: bool) {
+        if y < self.board.len() && x < self.board[y].len() {
+            self.board[y][x] = value;
+        }
+    }
+
+    fn get_neighbor_count(&self, x: usize, y: usize) -> u32 {
+        let mut alive = 0;
+
+        let y_min = max(y, 1) - 1;
+        let y_max = min(y + 1, self.board.len() - 1);
+        let x_min = max(x, 1) - 1;
+        let x_max = min(x + 1, self.board[0].len() - 1);
+
+        for board_y in y_min..=y_max {
+            for board_x in x_min..=x_max {
+                if !(board_x == x && board_y == y) && self.board[board_y][board_x] {
+                    alive += 1;
+                }
+            }
+        }
+
+        alive
+    }
+
+    fn update(&mut self) {
+        if self.board.len() == 0 { return; }
+
+        let mut new_board = Self::new(self.board[0].len(), self.board.len(), false);
+
+        for y in 0..self.board.len() {
+            for x in 0..self.board[y].len() {
+                let alive = self.get_neighbor_count(x, y);
+
+                if (self.board[y][x] && alive == 2) || alive == 3 {
+                        new_board.set(x, y, true);
+                }
+            }
+        }
+
+        self.board = new_board.board;
+    }
+
+    fn batch(&self, image: Image, color: Color) -> SpriteBatch {
+        let mut sprite_batch = SpriteBatch::new(image);
+
+        for y in 0..self.board.len() {
+            for x in 0..self.board[y].len() {
+                if self.board[y][x] {
+                    let point = Point2{ x: (x * TILE_SIZE) as f32, y: (y * TILE_SIZE) as f32 };
+                    sprite_batch.add(DrawParam::new().dest(point)
+                        .color(color));
+                }
+            }
+        }
+
+        sprite_batch
     }
 }
 
 struct GameState {
-    config: GameConfig,
-    rect_pixels: Vec<u8>,
-    game_board: Vec<Vec<bool>>,
+    tile_image: Option<Image>,
+    board: GameBoard,
     paused: bool,
-    mouse_left: bool,
-    mouse_right: bool,
-    slowness: f32
+    delay: f32
 }
 
 impl GameState {
-    fn new(config: GameConfig) -> GameState {
-        let rect_pixels = {
-            let mut vec : Vec<u8> = Vec::new();
-            for _ in 0..(config.tile_size * config.tile_size * 4) {
-                vec.push(255);
-            }
-            vec
-        };
+    fn tile_dim(ctx: &Context) -> (usize, usize) {
+        let (win_width, win_height) = graphics::size(ctx);
+        (win_width as usize / TILE_SIZE, win_height as usize / TILE_SIZE)
+    }
 
-        let game_board = new_board(true, &config);
+    fn win_to_tile_pos(x: f32, y: f32) -> (usize, usize) {
+        (x as usize/ TILE_SIZE, y as usize / TILE_SIZE)
+    }
+
+    fn new(ctx: &Context) -> GameState {
+        let (board_width, board_height) = Self::tile_dim(ctx);
 
         GameState {
-            config,
-            rect_pixels,
-            game_board,
+            tile_image: None,
+            board: GameBoard::new(board_width, board_height, true),
             paused: false,
-            mouse_left: false,
-            mouse_right: false,
-            slowness: 0.0
+            delay: 0.0
         }
     }
-}
-
-fn new_board(random: bool ,config: &GameConfig) -> Vec<Vec<bool>> {
-    let mut vec = Vec::new();
-
-    for _ in 0..config.game_height {
-        let mut vec_row = Vec::new();
-        for _ in 0..config.game_width {
-            if random {
-                vec_row.push(rand::random::<bool>());
-            } else {
-                vec_row.push(false);
-            }
-
-        }
-        vec.push(vec_row)
-    }
-     vec
-}
-
-fn get_surroundings(board: &Vec<Vec<bool>>, config: &GameConfig, x: i32, y: i32) -> i32{
-    let mut alive = 0;
-
-    for board_y in y-1..=y+1 {
-        for board_x in x-1..=x+1 {
-            if !(board_x < 0 || board_x >= config.game_width || board_y < 0 || board_y >= config.game_height) && !(board_x == x && board_y == y) {
-                if board[board_y as usize][board_x as usize] {
-                    alive +=1;
-                }
-            }
-        }
-    }
-
-    alive
 }
 
 impl EventHandler<GameError> for GameState {
     fn update(&mut self, _ctx: &mut Context) -> GameResult<()> {
-        if self.paused {
-            return Ok(())
-        }
-
-
-        let mut new_game_board = new_board(false, &self.config);
-        for y in 0..self.config.game_height {
-            for x in 0..self.config.game_width {
-                let alive = get_surroundings(&self.game_board, &self.config, x, y);
-
-                let y = y as usize;
-                let x = x as usize;
-
-                if self.game_board[y][x] {
-                    if alive < 2 || alive > 3 {
-                        new_game_board[y][x] = false;
-                    } else {
-                        new_game_board[y][x] = true;
-                    }
-                } else {
-                    if alive == 3 {
-                        new_game_board[y][x] = true;
-                    } else {
-                        new_game_board[y][x] = false;
-                    }
-                }
-            }
-        }
-
-        self.game_board = new_game_board;
-
-        sleep(Duration::from_secs_f32(self.slowness));
-
+        if self.paused { return Ok(()) }
+        self.board.update();
+        sleep(Duration::from_secs_f32(self.delay));
         Ok(())
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult<()> {
         clear(ctx, Color::BLACK);
 
-        let mut rectangles = SpriteBatch::new(Image::from_rgba8(ctx, self.config.tile_size as u16, self.config.tile_size as u16, self.rect_pixels.as_slice())?);
-
-        let color = if self.paused {
-            Color::new(0., 0., 1., 1.)
-        } else {
-            Color::WHITE
-        };
-
-        for y in 0..self.config.game_height {
-            for x in 0..self.config.game_width {
-                if self.game_board[y as usize][x as usize] {
-                    rectangles.add(DrawParam::new().dest(Point2{x: x as f32 * self.config.tile_size as f32, y: y as f32 * self.config.tile_size as f32 }).color(color));
-                }
+        if self.tile_image.is_none() {
+            self.tile_image = {
+                let pixels = {
+                    let mut vec : Vec<u8> = Vec::new();
+                    for _ in 0..(TILE_SIZE * TILE_SIZE * 4) {
+                        vec.push(255);
+                    }
+                    vec
+                };
+                Some(Image::from_rgba8(ctx, TILE_SIZE as u16, TILE_SIZE as u16, pixels.as_slice())?)
             }
         }
 
-        draw(ctx, &rectangles, DrawParam::new())?;
+        let color = if self.paused { Color::BLUE } else { Color::WHITE };
+        let batch = self.board.batch(self.tile_image.as_ref().unwrap().clone(), color);
 
+        draw(ctx, &batch, DrawParam::new())?;
         present(ctx)
     }
 
     fn mouse_button_down_event(&mut self, _ctx: &mut Context, button: MouseButton, x: f32, y: f32) {
-        let tile_x = (x / self.config.tile_size as f32) as usize;
-        let tile_y = (y / self.config.tile_size as f32) as usize;
-
-        if tile_x >= self.config.game_width as usize || tile_y >= self.config.game_height as usize{
-            return;
-        }
+        let (tile_x, tile_y) = Self::win_to_tile_pos(x, y);
 
         if button == MouseButton::Left {
-            self.game_board[tile_y][tile_x] = true;
-            self.mouse_left = true;
+            self.board.set(tile_x, tile_y, true);
         } else if button == MouseButton::Right {
-            self.game_board[tile_y][tile_x] = false;
-            self.mouse_right = true;
+            self.board.set(tile_x, tile_y, false);
         } else if button == MouseButton::Middle {
-            self.slowness = 0.0;
+            self.delay = 0.0;
         }
     }
 
-    fn mouse_button_up_event(&mut self, _ctx: &mut Context, button: MouseButton, _x: f32, _y: f32) {
-        if button == MouseButton::Left {
-            self.mouse_left = false;
-        } else if button == MouseButton::Right {
-            self.mouse_right = false;
-        }
-    }
+    fn mouse_motion_event(&mut self, ctx: &mut Context, x: f32, y: f32, _dx: f32, _dy: f32) {
+        let (tile_x, tile_y) = Self::win_to_tile_pos(x, y);
 
-    fn mouse_motion_event(&mut self, _ctx: &mut Context, x: f32, y: f32, _dx: f32, _dy: f32) {
-        if self.mouse_left || self.mouse_right {
-            let tile_x = (x / self.config.tile_size as f32) as usize;
-            let tile_y = (y / self.config.tile_size as f32) as usize;
-
-            if tile_x >= self.config.game_width as usize || tile_y >= self.config.game_height as usize{
-                return;
-            }
-
-            if self.mouse_left {
-                self.game_board[tile_y][tile_x] = true;
-            } else if self.mouse_right {
-                self.game_board[tile_y][tile_x] = false;
-            }
+        if button_pressed(ctx, MouseButton::Left) {
+            self.board.set(tile_x, tile_y, true);
+        } else if button_pressed(ctx, MouseButton::Left) {
+            self.board.set(tile_x, tile_y, false);
         }
     }
 
     fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) {
-        self.slowness += y * 0.01 ;
-        if self.slowness < 0.0 {
-            self.slowness = 0.0;
+        self.delay += y * 0.01 ;
+
+        if self.delay < 0.0 {
+            self.delay = 0.0;
+        } else if self.delay > 1.0 {
+            self.delay = 1.0;
         }
     }
 
     fn key_down_event(&mut self, ctx: &mut Context, keycode: KeyCode, _keymods: KeyMods, repeat: bool) {
+        if repeat { return; }
+        
         if keycode == KeyCode::Escape {
             quit(ctx);
-        }
-        if !repeat {
-            if keycode == KeyCode::P {
-                self.paused = !self.paused;
-            } else if keycode == KeyCode::R {
-                self.game_board = new_board(true, &self.config);
-            } else if keycode == KeyCode::C {
-                self.game_board = new_board(false, &self.config)
-            }
+        } else if keycode == KeyCode::P {
+            self.paused = !self.paused;
+        } else if keycode == KeyCode::R {
+            self.board.recreate(true);
+        } else if keycode == KeyCode::C {
+            self.board.recreate(false);
         }
     }
 }
