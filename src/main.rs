@@ -28,7 +28,7 @@ fn main() -> GameResult {
             .window_mode(window_mode)
             .add_resource_path(Path::new("/resources"))
         .build()?;
-
+    
     event::run(ctx, event_loop,GameState::new(config))
 }
 
@@ -243,57 +243,4 @@ impl EventHandler<GameError> for GameState {
             }
         }
     }
-
-    // fn resize_event(&mut self, _ctx: &mut Context, width: f32, height: f32) {
-    //     let old_width = self.config.game_width;
-    //     let old_height = self.config.game_height;
-    //
-    //     self.config.game_width = (width / self.config.tile_size as f32) as i32;
-    //     self.config.game_height = (height / self.config.tile_size as f32) as i32;
-    //
-    //     println!("New Width: {}, New Height: {}, {} tiles wide, {} tiles tall", width, height, self.config.game_width, self.config.game_height);
-    //
-    //     let mut board = new_board(true, &self.config);
-    //
-    //     if self.config.game_height >= old_height {
-    //         if self.config.game_width >= old_width {
-    //             for y in 0..old_height {
-    //                 for x in 0..old_width{
-    //                     let y = y as usize;
-    //                     let x = x as usize;
-    //                     board[y][x] = self.game_board[y][x];
-    //                 }
-    //             }
-    //         } else {
-    //             for y in 0..old_height {
-    //                 for x in 0..self.config.game_width{
-    //                     let y = y as usize;
-    //                     let x = x as usize;
-    //                     board[y][x] = self.game_board[y][x];
-    //                 }
-    //             }
-    //         }
-    //     } else {
-    //         if self.config.game_width >= old_width {
-    //             for y in 0..self.config.game_height {
-    //                 for x in 0..old_width{
-    //                     let y = y as usize;
-    //                     let x = x as usize;
-    //                     board[y][x] = self.game_board[y][x];
-    //                 }
-    //             }
-    //         } else {
-    //             for y in 0..self.config.game_height {
-    //                 for x in 0..self.config.game_width{
-    //                     let y = y as usize;
-    //                     let x = x as usize;
-    //                     board[y][x] = self.game_board[y][x];
-    //                 }
-    //             }
-    //         }
-    //     }
-    //
-    //
-    //     self.game_board = board;
-    // }
 }
