@@ -8,6 +8,7 @@ use ggez::event::{EventHandler, MouseButton, quit, KeyMods};
 use ggez::graphics::{self, spritebatch::SpriteBatch};
 use ggez::mint::Point2;
 use ggez::timer::sleep;
+use bitvec::prelude::*;
 use std::time::Duration;
 use std::path::Path;
 use std::cmp::{max, min};
@@ -35,14 +36,14 @@ fn main() -> GameResult {
 const TILE_SIZE : usize = 5;
 
 struct GameBoard {
-    board: Vec<Vec<bool>>
+    board: Vec<BitVec>
 }
 
 impl GameBoard {
     fn new(width: usize, height: usize, random: bool) -> Self {
         let mut vec = Vec::new();
         for _ in 0..height {
-            let mut vec_row = Vec::new();
+            let mut vec_row = BitVec::new();
             for _ in 0..width {
                 if random { vec_row.push(rand::random::<bool>()); }
                 else { vec_row.push(false); }
@@ -58,17 +59,17 @@ impl GameBoard {
     fn recreate(&mut self, random: bool) {
         for y in 0..self.board.len() {
             for x in 0..self.board[y].len() {
-                self.board[y][x] = {
+                self.board[y].set(x, {
                     if random { rand::random::<bool>() }
                     else { false }
-                }
+                });
             }
         }
     }
 
     fn set(&mut self, x: usize, y: usize, value: bool) {
         if y < self.board.len() && x < self.board[y].len() {
-            self.board[y][x] = value;
+            self.board[y].set(x, value);
         }
     }
 
